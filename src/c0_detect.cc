@@ -54,7 +54,7 @@ static double vectornorm2(const complex *v, const unsigned int len) {
 int c0_detect(usrp_source *u, int bi) {
 
 	static const double GSM_RATE = 1625000.0 / 6.0;
-	static const unsigned int NOTFOUND_MAX = 10;
+	static const unsigned int NOTFOUND_MAX = 1;
 
 	int i, chan_count;
 	unsigned int overruns, b_len, frames_len, found_count, notfound_count, r;
@@ -79,49 +79,6 @@ int c0_detect(usrp_source *u, int bi) {
 	}
 	u->start();
 	u->flush();
-	for(i = first_chan(bi); i > 0; i = next_chan(i, bi)) {
-		freq = arfcn_to_freq(i, &bi);
-		if(!u->tune(freq)) {
-			fprintf(stderr, "error: usrp_source::tune\n");
-			return -1;
-		}
-
-		do {
-			u->flush();
-			if(u->fill(frames_len, &overruns)) {
-				fprintf(stderr, "error: usrp_source::fill\n");
-				return -1;
-			}
-		} while(overruns);
-
-		b = (complex *)ub->peek(&b_len);
-		n = sqrt(vectornorm2(b, frames_len));
-		power[i] = n;
-		if(g_verbosity > 2) {
-			fprintf(stderr, "\tchan %d (%.1fMHz):\tpower: %lf\n",
-			   i, freq / 1e6, n);
-		}
-	}
-
-	/*
-	 * We want to use the average to determine which channels have
-	 * power, and hence a possibility of being channel 0 on a BTS.
-	 * However, some channels in the band can be extremely noisy.  (E.g.,
-	 * CDMA traffic in GSM-850.)  Hence we won't consider the noisiest
-	 * channels when we construct the average.
-	 */
-	chan_count = 0;
-	for(i = first_chan(bi); i > 0; i = next_chan(i, bi)) {
-		spower[chan_count++] = power[i];
-	}
-	sort(spower, chan_count);
-
-	// average the lowest %60
-	a = avg(spower, chan_count - 4 * chan_count / 10, 0);
-
-	if(g_verbosity > 0) {
-		fprintf(stderr, "channel detect threshold: %lf\n", a);
-	}
 
 	// then we look for fcch bursts
 	printf("%s:\n", bi_to_str(bi));
@@ -130,10 +87,7 @@ int c0_detect(usrp_source *u, int bi) {
 	sum = 0;
 	i = first_chan(bi);
 	do {
-		if(power[i] <= a) {
-			i = next_chan(i, bi);
-			continue;
-		}
+		fprintf(stdout, " Scanning ARFCN %d for FCCH bursts\n", i);
 
 		freq = arfcn_to_freq(i, &bi);
 		if(!u->tune(freq)) {
@@ -166,6 +120,8 @@ int c0_detect(usrp_source *u, int bi) {
 				i = next_chan(i, bi);
 			}
 		}
+		if (i <= 0)
+			i = first_chan(bi);
 	} while(i > 0);
 
 	return 0;
