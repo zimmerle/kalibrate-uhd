@@ -201,6 +201,32 @@ int first_chan(int bi) {
 }
 
 
+int last_chan(int bi) {
+
+	switch(bi) {
+		case GSM_850:
+			return 128;
+
+		case GSM_900:
+			return 1023;
+
+		case GSM_E_900:
+			return 1023;
+
+		case DCS_1800:
+			return 885;
+
+		case PCS_1900:
+			return 810;
+
+		default:
+			return -1;
+	}
+
+	return -1;
+}
+
+
 int next_chan_loop(int chan, int bi) {
 
 	switch(bi) {
