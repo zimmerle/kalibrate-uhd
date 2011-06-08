@@ -51,6 +51,7 @@
 #include <string.h>
 #include <sys/time.h>
 #include <errno.h>
+#include <pthread.h>
 
 #include "usrp_source.h"
 #include "fcch_detector.h"
@@ -58,9 +59,12 @@
 #include "offset.h"
 #include "c0_detect.h"
 #include "version.h"
+#include "socket.h"
+#include "linuxlist.h"
+#include "msgb.h"
 
+static const int MAX_THREADS = 10;
 static const double GSM_RATE = 1625000.0 / 6.0;
-
 
 int g_verbosity = 0;
 int g_debug = 0;
@@ -80,6 +84,10 @@ void usage(char *prog) {
 	printf("\t-f\tfrequency of nearby GSM base station\n");
 	printf("\t-c\tchannel of nearby GSM base station\n");
 	printf("\t-b\tband indicator (GSM850, GSM900, EGSM, DCS, PCS)\n");
+	printf("\t-j\tJammer IP address\n");
+	printf("\t-p\tJammer port\n");
+	printf("\t-b\tBTS IP address\n");
+	printf("\t-q\tBTS port\n");
 	printf("\t-R\tside A (0) or B (1), defaults to B\n");
 	printf("\t-A\tantenna TX/RX (0) or RX2 (1), defaults to RX2\n");
 	printf("\t-g\tgain as %% of range, defaults to 45%%\n");
@@ -91,19 +99,119 @@ void usage(char *prog) {
 	exit(-1);
 }
 
+struct session {
+	llist_head list;
+	int fd;
+	int num;
+	bool running;
+};
+
+static int msg_handler(struct session *sess, struct msgb *msg)
+{
+	int rc;
+	size_t bytes_wr;
+	struct session *pos;
+
+	switch (msg->cmd) {
+	case JM_NACK_FREQ:
+                fprintf(stdout, "\nReceived JM_NACK_FREQ %u\n", msg->arfcn);
+
+		pos = llist_entry(sess->list.next, struct session, list);
+		if (pos->num == 0) {
+			fprintf(stdout, "Resource unavailable\n");
+			return 0;
+		}
+
+		msg->cmd = JM_ADD_FREQ;
+		bytes_wr = writen(pos->fd, (char *) msg, sizeof(msgb));
+		if (bytes_wr != sizeof(msgb)) {
+			sess->running = false;
+			return -1;
+		}
+		break;
+	default:
+                fprintf(stderr, "Unknown %d command\n", msg->cmd);
+                return -1;
+	}
+
+	return 0;
+}
+
+static void *ctl_loop(void *arg)
+{
+	struct msgb msg;
+	session *sess = (struct session *) arg;
+	ssize_t bytes_rd;
+
+	while (sess->running) {
+		bytes_rd = readn(sess->fd, (char *) &msg, sizeof(msg));
+		if (bytes_rd != sizeof(msg))
+			break;
+
+		msg_handler(sess, &msg);
+	}
+
+	close(sess->fd);
+
+	fprintf(stdout, "Connection closed\n");
+	pthread_exit(NULL);
+}
+
+int parse_conns(char *addr_in, char *port_in, char **addr_out, char **port_out)
+{
+	char *addr_ptr,  *port_ptr;
+	int addr_cnt, port_cnt;
+
+	if ((addr_in == NULL) ||(port_in == NULL))
+		return -1;
+
+	addr_out[0] = addr_in;
+	port_out[0] = port_in;
+
+	addr_ptr = addr_in;
+	port_ptr = port_in;
+
+	addr_cnt = 1;
+	port_cnt = 1;
+
+	while (addr_ptr = strchr(addr_ptr, ' ')) {
+		if (*++addr_ptr != ' ') 
+			addr_out[addr_cnt++] = addr_ptr;
+	}
+
+	while (port_ptr = strchr(port_ptr, ' ')) {
+		if (*++port_ptr != ' ')
+			port_out[port_cnt++] = port_ptr++;
+	}
+
+	if (addr_cnt != port_cnt)
+		return -1;
+
+	return addr_cnt;
+}
 
 int main(int argc, char **argv) {
 
 	char *endptr;
+	char *addr_jm = NULL;
+	char *port_jm = NULL;
+	char *addr_bts = NULL;
+	char *port_bts = NULL;
+
 	int c, antenna = 1, bi = BI_NOT_DEFINED, chan = -1, bts_scan = 0;
 	unsigned int subdev = 1;
 	long int fpga_master_clock_freq = 100000000;
 	bool external_ref = false;
 	float gain = 0.45;
-	double freq = -1.0, fd;
+	double freq = -1.0;
 	usrp_source *u;
 
-	while((c = getopt(argc, argv, "f:c:s:b:R:A:g:F:xvDh?")) != EOF) {
+	int bts_fd;
+	pthread_t thrd[MAX_THREADS];
+	session sess;
+	INIT_LLIST_HEAD(&sess.list);
+
+	while((c = getopt(argc, argv, "f:c:s:b:j:p:t:q:R:A:g:F:xvDh?")) != EOF) {
 		switch(c) {
 			case 'f':
 				freq = strtod(optarg, 0);
@@ -129,7 +237,18 @@ int main(int argc, char **argv) {
 					usage(argv[0]);
 				}
 				break;
-
+			case 'j':
+				addr_jm = optarg;
+				break;
+			case 'p':
+				port_jm = optarg;
+				break;
+			case 't':
+				addr_bts = optarg;
+				break;
+			case 'q':
+				port_bts = optarg;
+				break;
 			case 'R':
 				errno = 0;
 				subdev = strtoul(optarg, &endptr, 0);
@@ -244,6 +363,42 @@ int main(int argc, char **argv) {
 		printf("debug: Gain                  :\t%f\n", gain);
 	}
 
+	char *addr_out[MAX_THREADS];
+	char *port_out[MAX_THREADS];
+
+	// parse IP addresses and ports 
+	int num_conn = parse_conns(addr_jm, port_jm, addr_out, port_out);
+	if (num_conn <= 0)
+		return -1;
+	
+	// make jammer connections
+	for (int i = 0; i < num_conn; i++) {
+		session *new_sess = new session();
+
+		new_sess->fd = make_connection(addr_out[i], atoi(port_out[i]));
+		if(new_sess->fd < 0) {
+			fprintf(stderr, "error: could not establish connection\n");
+			return -1;
+		}
+
+		new_sess->num = i;
+		new_sess->running = true;
+
+		llist_add(&new_sess->list, &sess.list);
+		pthread_create(&thrd[i], NULL, &ctl_loop, (void *) new_sess);
+
+		printf("Connection established to %s port %s\n", addr_out[i], port_out[i]);
+	}
+
+	// make bts connection
+	if (addr_bts) {
+		bts_fd = make_connection(addr_bts, atoi(port_bts));
+		if (bts_fd < 0) {
+			fprintf(stderr, "error: could not establish BTS connection\n");
+			return -1;
+		}
+	}
+
 	// let the device decide on the decimation
 	u = new usrp_source(GSM_RATE, fpga_master_clock_freq, external_ref);
 	if(!u) {
@@ -277,5 +432,9 @@ int main(int argc, char **argv) {
 	fprintf(stderr, "%s: Scanning for %s base stations.\n",
 	   basename(argv[0]), bi_to_str(bi));
 
-	return c0_detect(u, bi);
+	// start loading carriers on the first connection
+	struct session *pos;
+	pos = llist_entry(sess.list.next, struct session, list);
+
+	return c0_detect(u, bi, pos->fd, bts_fd);
 }

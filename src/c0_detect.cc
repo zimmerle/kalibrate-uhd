@@ -34,6 +34,9 @@
 #include "fcch_detector.h"
 #include "arfcn_freq.h"
 #include "util.h"
+#include "socket.h"
+#include "msgb.h"
+#include "linuxlist.h"
 
 extern int g_verbosity;
 
@@ -50,8 +53,52 @@ static double vectornorm2(const complex *v, const unsigned int len) {
 	return e;
 }
 
+struct freq_desc {
+	llist_head list;
+	int band;
+	int arfcn;
+	double freq;
+};
 
-int c0_detect(usrp_source *u, int bi) {
+static int send_freq_msg(int fd, int band, int arfcn)
+{
+	// create command message
+	struct msgb msg;
+	msg.cmd = JM_ADD_FREQ;
+	msg.band = band;
+	msg.ampl = 255;
+	msg.arfcn = arfcn;
+
+	// send out
+	writen(fd, (char *) &msg, sizeof(msg));
+}
+
+static int sel_bts_chan(struct freq_desc *freqs, int band)
+{
+	bool clr;
+	int arfcn_lo, arfcn_hi, arfcn_rand;
+	struct freq_desc *pos;
+	int arfcn_dst = 8;
+
+	arfcn_lo = first_chan(band);
+	arfcn_hi = last_chan(band);
+
+	do {
+		clr = true;
+		arfcn_rand = rand() % (arfcn_hi - arfcn_lo) + arfcn_lo;
+
+		llist_for_each_entry(pos, &freqs->list, list) {
+			if (arfcn_rand < (pos->arfcn + arfcn_dst)) {
+				if (arfcn_rand > (pos->arfcn - arfcn_dst))
+					clr = false;
+			}
+		}
+	} while (clr == false);
+
+	return arfcn_rand;
+}
+
+int c0_detect(usrp_source *u, int bi, int fd, int bts_fd) {
 
 	static const double GSM_RATE = 1625000.0 / 6.0;
 	static const unsigned int NOTFOUND_MAX = 1;
@@ -63,6 +110,10 @@ int c0_detect(usrp_source *u, int bi) {
 	complex *b;
 	circular_buffer *ub;
 	fcch_detector *l = new fcch_detector(u->sample_rate());
+	struct freq_desc freqs;
+	int arfcn_bts = 0;
+
+	INIT_LLIST_HEAD(&freqs.list);
 
 	if(bi == BI_NOT_DEFINED) {
 		fprintf(stderr, "error: c0_detect: band not defined\n");
@@ -85,6 +136,7 @@ int c0_detect(usrp_source *u, int bi) {
 	found_count = 0;
 	notfound_count = 0;
 	sum = 0;
+
 	i = first_chan(bi);
 	do {
 		fprintf(stdout, " Scanning ARFCN %d for FCCH bursts\n", i);
@@ -111,6 +163,18 @@ int c0_detect(usrp_source *u, int bi) {
 			display_freq(offset - GSM_RATE / 4);
 			printf(")\tpower: %6.2lf\n", power[i]);
 			notfound_count = 0;
+
+			if (i == arfcn_bts) {
+				printf("\tskipping...\n");
+			} else {
+				freq_desc *desc = new freq_desc();
+				desc->band = bi;
+				desc->arfcn = i;
+
+				llist_add(&desc->list, &freqs.list);
+				send_freq_msg(fd, bi, i);
+			} 
+
 			i = next_chan(i, bi);
 		} else {
 			// not found
@@ -120,8 +184,15 @@ int c0_detect(usrp_source *u, int bi) {
 				i = next_chan(i, bi);
 			}
 		}
-		if (i <= 0)
+		// end of sweep
+		if (i <= 0) {
+			if (!arfcn_bts) {
+				arfcn_bts = sel_bts_chan(&freqs, bi);
+				send_freq_msg(bts_fd, bi, arfcn_bts);
+			}
 			i = first_chan(bi);
+		}
+
 	} while(i > 0);
 
 	return 0;
