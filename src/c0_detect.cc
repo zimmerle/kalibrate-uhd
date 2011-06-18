@@ -87,6 +87,8 @@ int c0_detect(usrp_source *u, int bi) {
 	sum = 0;
 	i = first_chan(bi);
 	do {
+		fprintf(stdout, "scanning channel: %i\n", i);
+
 		freq = arfcn_to_freq(i, &bi);
 		if(!u->tune(freq)) {
 			fprintf(stderr, "error: usrp_source::tune\n");
