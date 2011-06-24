@@ -9,6 +9,7 @@ kal_SOURCES = \
    offset.cc \
    usrp_source.cc \
    util.cc\
+   socket.cc \
    arfcn_freq.h \
    c0_detect.h \
    circular_buffer.h \
@@ -17,6 +18,8 @@ kal_SOURCES = \
    usrp_complex.h \
    usrp_source.h \
    util.h\
+   socket.h \
+   msgb.h \
    version.h
 
 kal_CXXFLAGS = $(FFTW3_CFLAGS) $(UHD_CFLAGS)

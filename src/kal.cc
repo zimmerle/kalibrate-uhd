@@ -86,7 +86,7 @@ void usage(char *prog) {
 	printf("\t-b\tband indicator (GSM850, GSM900, EGSM, DCS, PCS)\n");
 	printf("\t-j\tJammer IP address\n");
 	printf("\t-p\tJammer port\n");
-	printf("\t-b\tBTS IP address\n");
+	printf("\t-t\tBTS IP address\n");
 	printf("\t-q\tBTS port\n");
 	printf("\t-R\tside A (0) or B (1), defaults to B\n");
 	printf("\t-A\tantenna TX/RX (0) or RX2 (1), defaults to RX2\n");
@@ -368,16 +368,17 @@ int main(int argc, char **argv) {
 
 	// parse IP addresses and ports 
 	int num_conn = parse_conns(addr_jm, port_jm, addr_out, port_out);
-	if (num_conn <= 0)
-		return -1;
-	
+	if (num_conn <= 0) {
+		fprintf(stderr, "error: could not parse IP addresses or ports\n");
+	}
+
 	// make jammer connections
 	for (int i = 0; i < num_conn; i++) {
 		session *new_sess = new session();
 
 		new_sess->fd = make_connection(addr_out[i], atoi(port_out[i]));
 		if(new_sess->fd < 0) {
-			fprintf(stderr, "error: could not establish connection\n");
+			fprintf(stderr, "error: could not establish signal generator connection\n");
 			return -1;
 		}
 
