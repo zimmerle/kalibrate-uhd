@@ -101,9 +101,10 @@ int main(int argc, char **argv) {
 	bool external_ref = false;
 	float gain = 0.45;
 	double freq = -1.0, fd;
+	char *device_addr = "type=usrp2";
 	usrp_source *u;
 
-	while((c = getopt(argc, argv, "f:c:s:b:R:A:g:F:xvDh?")) != EOF) {
+	while((c = getopt(argc, argv, "a:f:c:s:b:R:A:g:F:xvDh?")) != EOF) {
 		switch(c) {
 			case 'f':
 				freq = strtod(optarg, 0);
@@ -195,6 +196,10 @@ int main(int argc, char **argv) {
 				g_debug = 1;
 				break;
 
+			case 'a':
+				device_addr = optarg;
+				break;
+
 			case 'h':
 			case '?':
 			default:
@@ -245,7 +250,7 @@ int main(int argc, char **argv) {
 	}
 
 	// let the device decide on the decimation
-	u = new usrp_source(GSM_RATE, fpga_master_clock_freq, external_ref);
+	u = new usrp_source(GSM_RATE, device_addr, fpga_master_clock_freq, external_ref);
 	if(!u) {
 		fprintf(stderr, "error: usrp_source\n");
 		return -1;

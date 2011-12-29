@@ -42,12 +42,14 @@ extern int g_verbosity;
 
 
 usrp_source::usrp_source(float sample_rate,
+			char *device_addr,
 			long int fpga_master_clock_freq,
 			bool external_ref) {
 
 	m_desired_sample_rate = sample_rate;
 	m_fpga_master_clock_freq = fpga_master_clock_freq;
 	m_external_ref = external_ref;
+	m_device_addr = device_addr;
 	m_sample_rate = 0.0;
 	m_dev.reset();
 	m_cb = new circular_buffer(CB_LEN, sizeof(complex), 0);
@@ -147,7 +149,7 @@ bool usrp_source::set_gain(float gain) {
 int usrp_source::open(unsigned int subdev) {
 
 	if(!m_dev) {
-		uhd::device_addr_t dev_addr("type=usrp2");
+		uhd::device_addr_t dev_addr(m_device_addr);
 		if (!(m_dev = uhd::usrp::single_usrp::make(dev_addr))) {
 			fprintf(stderr, "error: single_usrp::make: failed!\n");
 			return -1;

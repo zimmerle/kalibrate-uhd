@@ -34,6 +34,7 @@
 class usrp_source {
 public:
 	usrp_source(float sample_rate,
+		char *device_attr,
 		long int fpga_master_clock_freq = 100000000,
 		bool external_ref = false);
 
@@ -65,6 +66,7 @@ private:
 	bool				m_external_ref;
 	unsigned int			m_recv_samples_per_packet;
 	long int			m_fpga_master_clock_freq;
+	char *				m_device_addr;
 
 	circular_buffer *		m_cb;
 
