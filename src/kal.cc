@@ -82,6 +82,7 @@ void usage(char *prog) {
 	printf("\t-b\tband indicator (GSM850, GSM900, EGSM, DCS, PCS)\n");
 	printf("\t-R\tside A (0) or B (1), defaults to B\n");
 	printf("\t-A\tantenna TX/RX (0) or RX2 (1), defaults to RX2\n");
+	printf("\t-a\tdevice address, defaults to type=usrp2\n");
 	printf("\t-g\tgain as %% of range, defaults to 45%%\n");
 	printf("\t-F\tFPGA master clock frequency, defaults to 52MHz\n");
 	printf("\t-x\tenable external 10MHz reference input\n");
